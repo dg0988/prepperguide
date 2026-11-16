@@ -11,6 +11,8 @@ on:
     types: [published]
 permissions:
   contents: write
+  id-token: write      # needed for artifact attestations
+  attestations: write
 concurrency:
   group: release-${{ github.event.release.tag_name || github.ref_name }}
 jobs:
@@ -30,6 +32,13 @@ jobs:
         run: |
           V=$(node -p "require('./manifest.json').version")
           [ "$V" = "$TAG" ] || { echo "::error::Tag $TAG doesn't match manifest.json version $V"; exit 1; }
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            main.js
+            styles.css
+            manifest.json
       - name: Attach files to release
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
