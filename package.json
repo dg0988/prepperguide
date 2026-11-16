@@ -1,6 +1,6 @@
 {
   "name": "obsidian-prepper-field-guide",
-  "version": "2.0.2",
+  "version": "2.0.3",
   "description": "Builds an offline, location-based preparedness field guide in your vault: maps, local edible & toxic plants, water sources, emergency resources, weather alerts and survival guides.",
   "main": "main.js",
   "scripts": {

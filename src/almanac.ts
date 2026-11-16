@@ -50,13 +50,14 @@ async function fetchHistory(lat: number, lon: number, startYear: number, endYear
 	let snowStation: string | null = null;
 	try {
 		const meta = await acis<AcisMeta>("StnMeta", { bbox: `${lon - 0.4},${lat - 0.4},${lon + 0.4},${lat + 0.4}`, elems: "snow", sdate: `${startYear}-01-01`, edate: `${endYear}-12-31`, meta: "name,ll,sids,valid_daterange" });
-		const cands = (meta.meta || [])
-			.flatMap((m) => {
-				const range = m.valid_daterange?.[0];
-				if (!m.ll || !range || range.length !== 2) return [];
-				return [{ m, d: Math.hypot(m.ll[0] - lon, m.ll[1] - lat), yrs: (Date.parse(range[1]) - Date.parse(range[0])) / 3.15e10 }];
-			})
-			.filter((c) => c.yrs >= 15).sort((a, b) => a.d - b.d);
+		const cands: { m: AcisStation; d: number; yrs: number }[] = [];
+		for (const m of meta.meta ?? []) {
+			const range = m.valid_daterange?.[0];
+			if (!m.ll || !range || range.length !== 2) continue;
+			const yrs = (Date.parse(range[1]) - Date.parse(range[0])) / 3.15e10;
+			if (yrs >= 15) cands.push({ m, d: Math.hypot(m.ll[0] - lon, m.ll[1] - lat), yrs });
+		}
+		cands.sort((a, b) => a.d - b.d);
 		if (cands.length) {
 			const st = cands[0].m;
 			const sd = await acis<AcisStnData>("StnData", { sid: st.sids[0].split(" ")[0], sdate: `${startYear}-01-01`, edate: `${endYear}-12-31`, elems: "snow" });
