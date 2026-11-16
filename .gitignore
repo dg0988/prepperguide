@@ -1,0 +1,18 @@
+# dependencies & build output
+node_modules/
+sales-worker/node_modules/
+sales-worker/.wrangler/
+main.js
+dist/
+!sales-worker/dist/
+*.zip
+
+# SECRETS — never commit
+keys/private.key
+*.key
+!keys/public.key
+*secret*
+*SECRET*
+.dev.vars
+.env
+.env.*

@@ -1,0 +1,9 @@
+{
+  "id": "prepper-field-guide",
+  "name": "Prepper Field Guide",
+  "version": "2.0.0",
+  "minAppVersion": "1.4.0",
+  "description": "Builds an offline, location-based preparedness field guide in your vault: topo maps, local edible & toxic plants, water sources, emergency resources, weather alerts and survival guides.",
+  "author": "Dmitry",
+  "isDesktopOnly": false
+}
