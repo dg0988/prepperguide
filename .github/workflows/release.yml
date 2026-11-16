@@ -1,18 +1,27 @@
-# Builds the plugin and publishes a GitHub release whenever you push a version tag.
-#   1. bump "version" in manifest.json + package.json, add it to versions.json
-#   2. git commit -am "2.0.1" && git tag 2.0.1 && git push && git push --tags
-# Obsidian's directory and BRAT install/update from these releases.
+# Builds the plugin and attaches main.js, manifest.json, styles.css to a GitHub release.
+# Works either way:
+#   • Website: Releases → Draft a new release → tag "2.0.1" (must equal manifest.json "version") → Publish
+#   • Command line: git tag 2.0.1 && git push origin 2.0.1
+# Obsidian's directory and BRAT install/update from these release files.
 name: Release plugin
 on:
   push:
     tags: ["*"]
+  release:
+    types: [published]
 permissions:
   contents: write
+concurrency:
+  group: release-${{ github.event.release.tag_name || github.ref_name }}
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      TAG: ${{ github.event.release.tag_name || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
+        with: { ref: "${{ github.event.release.tag_name || github.ref_name }}" }
       - uses: actions/setup-node@v4
         with: { node-version: 20, cache: npm }
       - run: npm ci
@@ -20,7 +29,11 @@ jobs:
       - name: Check tag matches manifest version
         run: |
           V=$(node -p "require('./manifest.json').version")
-          [ "$V" = "${GITHUB_REF_NAME}" ] || { echo "Tag ${GITHUB_REF_NAME} != manifest $V"; exit 1; }
-      - name: Publish release
-        env: { GH_TOKEN: "${{ github.token }}" }
-        run: gh release create "${GITHUB_REF_NAME}" main.js manifest.json styles.css --title "${GITHUB_REF_NAME}" --generate-notes
+          [ "$V" = "$TAG" ] || { echo "::error::Tag $TAG doesn't match manifest.json version $V"; exit 1; }
+      - name: Attach files to release
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" main.js manifest.json styles.css --clobber
+          else
+            gh release create "$TAG" main.js manifest.json styles.css --title "$TAG" --generate-notes
+          fi
