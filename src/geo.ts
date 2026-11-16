@@ -5,14 +5,18 @@ export interface GeoResult { lat: number; lon: number; label: string; matched?: 
 
 const looksLikeStreetAddress = (q: string) => /^\s*\d+[a-z]?\s+\S+/i.test(q);
 
+interface CensusResponse { result?: { addressMatches?: { matchedAddress: string; coordinates: { x: number; y: number }; addressComponents?: { city?: string; state?: string } }[] } }
+interface NominatimAddress { city?: string; town?: string; village?: string; hamlet?: string; county?: string; state?: string; country_code?: string; house_number?: string }
+interface NominatimResult { lat: string; lon: string; display_name: string; addresstype?: string; type?: string; address?: NominatimAddress }
+
 /** US Census Bureau geocoder — street-address level for US addresses, free, no key. */
 async function censusGeocode(q: string): Promise<GeoResult | null> {
 	try {
 		const url = `https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?benchmark=Public_AR_Current&format=json&address=${encodeURIComponent(q)}`;
-		const j = await getJson<any>(url);
+		const j = await getJson<CensusResponse>(url);
 		const m = j?.result?.addressMatches?.[0];
 		if (!m) return null;
-		const c = m.addressComponents || {};
+		const c = m.addressComponents ?? {};
 		return {
 			lat: m.coordinates.y, lon: m.coordinates.x,
 			label: [c.city, c.state].filter(Boolean).join(", ") || m.matchedAddress,
@@ -23,17 +27,17 @@ async function censusGeocode(q: string): Promise<GeoResult | null> {
 
 async function nominatimGeocode(q: string): Promise<GeoResult | null> {
 	const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&addressdetails=1&q=${encodeURIComponent(q)}`;
-	const res = await getJson<any[]>(url);
+	const res = await getJson<NominatimResult[]>(url);
 	if (!res || !res.length) return null;
 	const r = res[0];
-	const a = r.address || {};
+	const a: NominatimAddress = r.address ?? {};
 	const town = a.city || a.town || a.village || a.hamlet || a.county || "";
-	const t = String(r.addresstype || r.type || "");
-	const precision: Precision = ["house", "building", "amenity", "shop", "place", "leisure", "tourism"].includes(t) || a.house_number ? "exact"
+	const t = r.addresstype || r.type || "";
+	const precision: Precision = ["house", "building", "amenity", "shop", "place", "leisure", "tourism"].includes(t) || !!a.house_number ? "exact"
 		: ["road", "street", "highway"].includes(t) ? "street" : "area";
 	return {
 		lat: parseFloat(r.lat), lon: parseFloat(r.lon),
-		label: [town, a.state, a.country_code ? String(a.country_code).toUpperCase() : ""].filter(Boolean).join(", ") || r.display_name,
+		label: [town, a.state, a.country_code ? a.country_code.toUpperCase() : ""].filter(Boolean).join(", ") || r.display_name,
 		matched: r.display_name, precision, source: "OpenStreetMap Nominatim",
 	};
 }

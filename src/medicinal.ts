@@ -1,6 +1,6 @@
 import { App } from "obsidian";
 import { SpeciesCount, speciesCounts, wikiSummary } from "./plants";
-import { fetchWithRetry, Logger, safeName, sleep, today, writeBinary, writeText } from "./util";
+import { fetchWithRetry, firstSentence, Logger, safeName, sleep, today, writeBinary, writeText } from "./util";
 
 /**
  * Medicinal plant reference (North America). Deliberately conservative:
@@ -222,7 +222,7 @@ export async function buildMedicinal(app: App, job: MedJob): Promise<number> {
 		if (!g.length) continue;
 		const S = STATUS[st];
 		I.push(`## ${S.icon} ${S.label} (${g.length})`, "| Plant | Used for | Evidence | Local obs. |", "|---|---|---|---|");
-		for (const h of g) I.push(`| [[${h.path.replace(/\.md$/, "")}\\|${h.sc.taxon.preferred_common_name || h.m.common}]] | ${h.m.uses.split(/(?<=[.—])\s/)[0].replace(/\|/g, "/")} | ${EVIDENCE[h.m.evidence]} | ${h.sc.count} |`);
+		for (const h of g) I.push(`| [[${h.path.replace(/\.md$/, "")}\\|${h.sc.taxon.preferred_common_name || h.m.common}]] | ${firstSentence(h.m.uses).replace(/\|/g, "/")} | ${EVIDENCE[h.m.evidence]} | ${h.sc.count} |`);
 		I.push("");
 	}
 	const quick: [string, RegExp][] = [
@@ -238,7 +238,7 @@ export async function buildMedicinal(app: App, job: MedJob): Promise<number> {
 	const notSeenAvoid = MED_DB.filter((m) => m.status === "avoid" && !seenKeys.has(m.key));
 	if (notSeenAvoid.length) {
 		I.push("", "## ⛔ Also avoid (not recorded nearby, but sold or recommended online)");
-		for (const m of notSeenAvoid) I.push(`- **${m.common}** (*${m.key}*) — ${m.cautions.split(/(?<=\.)\s/)[0]}`);
+		for (const m of notSeenAvoid) I.push(`- **${m.common}** (*${m.key}*) — ${firstSentence(m.cautions)}`);
 	}
 	I.push("", "*Plant records: iNaturalist. Evidence ratings summarize published reviews (e.g. NIH NCCIH herb fact sheets) at a general level. Not medical advice.*");
 	await writeText(app, `${base}/Medicinal Plants Index.md`, I.join("\n"));

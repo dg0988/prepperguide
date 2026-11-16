@@ -31,13 +31,13 @@ const BLANK = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAA
 function offlineLayer(host: MapHost, src: TileSource): L.TileLayer {
 	const Layer = L.TileLayer.extend({
 		createTile(this: L.TileLayer, coords: L.Coords, done: L.DoneCallback) {
-			const canvas = document.createElement("canvas");
+			const canvas = createEl("canvas");
 			canvas.width = canvas.height = 256;
 			const ctx = canvas.getContext("2d")!;
 			const adapter = host.app.vault.adapter;
 			const folder = host.folder();
 			const load = async (buf: ArrayBuffer) => createImageBitmap(new Blob([buf]));
-			(async () => {
+			void (async () => {
 				const { x, y, z } = coords;
 				// 1. exact tile from cache
 				const p = tilePath(folder, src, z, x, y);
@@ -74,7 +74,7 @@ function offlineLayer(host: MapHost, src: TileSource): L.TileLayer {
 			return canvas;
 		},
 	});
-	return new (Layer as any)(BLANK, { maxNativeZoom: src.maxZoom, maxZoom: 19, attribution: src.attribution, keepBuffer: 4 });
+	return new (Layer as unknown as new (url: string, options: L.TileLayerOptions) => L.TileLayer)(BLANK, { maxNativeZoom: src.maxZoom, maxZoom: 19, attribution: src.attribution, keepBuffer: 4 });
 }
 
 const dot = (color: string, r = 7) => ({ radius: r, color: "#fff", weight: 2, fillColor: color, fillOpacity: 0.95 });
@@ -146,7 +146,7 @@ export class PrepperMapView extends ItemView {
 			onAdd: () => {
 				const div = L.DomUtil.create("div", "leaflet-bar prepper-bar");
 				const btn = (label: string, title: string, fn: () => void) => {
-					const a = L.DomUtil.create("a", "", div) as HTMLAnchorElement;
+					const a = L.DomUtil.create("a", "", div);
 					a.href = "#"; a.title = title; a.setText(label);
 					L.DomEvent.on(a, "click", (e) => { L.DomEvent.preventDefault(e); L.DomEvent.stopPropagation(e); fn(); });
 				};
@@ -156,11 +156,11 @@ export class PrepperMapView extends ItemView {
 				return div;
 			},
 		});
-		new (Bar as any)({ position: "topleft" }).addTo(map);
+		new (Bar as unknown as new (options: L.ControlOptions) => L.Control)({ position: "topleft" }).addTo(map);
 
 		map.on("contextmenu", (e: L.LeafletMouseEvent) => this.pointPopup(e.latlng));
 		map.on("click", (e: L.LeafletMouseEvent) => { if (this.pickMode) this.pointPopup(e.latlng); });
-		setTimeout(() => map.invalidateSize(), 100);
+		window.setTimeout(() => map.invalidateSize(), 100);
 	}
 
 	private distLine(lat: number, lon: number): string {
@@ -196,7 +196,7 @@ export class PrepperMapView extends ItemView {
 		homeBtn.onclick = async () => { this.map?.closePopup(); this.pickMode = false; await this.host.setHome(ll.lat, ll.lng); };
 		this.wpButton(row, ll.lat, ll.lng);
 		const copy = row.createEl("button", { text: "📋 Copy" });
-		copy.onclick = () => { navigator.clipboard.writeText(fmtCoord(ll.lat, ll.lng)); new Notice("Coordinates copied"); };
+		copy.onclick = () => { void navigator.clipboard.writeText(fmtCoord(ll.lat, ll.lng)).then(() => new Notice("Coordinates copied")); };
 		L.popup().setLatLng(ll).setContent(d).openOn(this.map!);
 	}
 
@@ -210,7 +210,7 @@ export class PrepperMapView extends ItemView {
 			input.value = suggested;
 			const note = box.createEl("input", { type: "text", placeholder: "Note (optional)" });
 			const save = box.createEl("button", { text: "Save", cls: "mod-cta" });
-			setTimeout(() => input.focus(), 50);
+			window.setTimeout(() => input.focus(), 50);
 			save.onclick = async () => {
 				const w: Waypoint = { id: String(Date.now()), name: input.value.trim() || "Waypoint", lat, lon, note: note.value.trim() || undefined, created: new Date().toISOString().slice(0, 10) };
 				await this.host.addWaypoint(w);

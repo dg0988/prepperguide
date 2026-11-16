@@ -2,10 +2,16 @@ import { App, normalizePath, requestUrl, RequestUrlParam, TFile } from "obsidian
 
 export const USER_AGENT = "ObsidianPrepperFieldGuide/1.0 (personal offline preparedness notes)";
 
-export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+export const sleep = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
+
+/** First sentence of a text (no regex lookbehind — unsupported on iOS < 16.4). */
+export function firstSentence(s: string): string {
+	const m = s.match(/^[\s\S]*?\.(?=\s+[A-Z("“]|\s*$)/);
+	return (m ? m[0] : s).trim();
+}
 
 export function safeName(s: string): string {
-	return s.replace(/[\\/:*?"<>|#^\[\]]/g, "").replace(/\s+/g, " ").trim().slice(0, 120);
+	return s.replace(/[\\/:*?"<>|#^[\]]/g, "").replace(/\s+/g, " ").trim().slice(0, 120);
 }
 
 export async function ensureFolder(app: App, path: string): Promise<void> {
@@ -53,7 +59,7 @@ export async function fetchWithRetry(req: RequestUrlParam, tries = 3) {
 	throw lastErr;
 }
 
-export async function getJson<T = any>(url: string, headers?: Record<string, string>): Promise<T> {
+export async function getJson<T = unknown>(url: string, headers?: Record<string, string>): Promise<T> {
 	const res = await fetchWithRetry({ url, headers: { Accept: "application/json", ...(headers || {}) } });
 	return res.json as T;
 }

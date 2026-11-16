@@ -13,7 +13,14 @@ import { fetchWithRetry, getJson, Logger, today, writeText } from "./util";
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const FULL_MOON_NAMES = ["Wolf", "Snow", "Worm", "Pink", "Flower", "Strawberry", "Buck", "Sturgeon", "Corn/Harvest", "Hunter's", "Beaver", "Cold"];
 
-interface Daily { time: string[]; tmax: number[]; tmin: number[]; prcp: number[]; snow: number[] }
+interface Daily { time: string[]; tmax: (number | null)[]; tmin: (number | null)[]; prcp: (number | null)[]; snow: number[] }
+type AcisValue = string | number;
+interface AcisGrid { data?: [string, ...AcisValue[]][] }
+interface AcisStation { name: string; ll?: [number, number]; sids: string[]; valid_daterange?: string[][] }
+interface AcisMeta { meta?: AcisStation[] }
+interface AcisStnData { data?: [string, AcisValue][] }
+type Attrs = Record<string, unknown>;
+interface CpcResponse { error?: unknown; features?: { attributes?: Attrs }[] }
 
 const doy = (d: Date) => Math.floor((Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - Date.UTC(d.getUTCFullYear(), 0, 0)) / 86400000);
 const fmtDoy = (n: number) => { const d = new Date(Date.UTC(2023, 0, 1)); d.setUTCDate(n); return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}`; };
@@ -23,28 +30,36 @@ const r0 = (n: number) => (isFinite(n) ? Math.round(n) : "—");
 const r1 = (n: number) => (isFinite(n) ? n.toFixed(1) : "—");
 
 const ACIS = "https://data.rcc-acis.org";
-async function acis(endpoint: string, params: any): Promise<any> {
+async function acis<T>(endpoint: string, params: Record<string, string>): Promise<T> {
 	const res = await fetchWithRetry({ url: `${ACIS}/${endpoint}`, method: "POST", contentType: "application/json", body: JSON.stringify(params) });
-	return res.json;
+	return res.json as T;
 }
-const num = (v: any): number | null => { if (v === "T") return 0; const n = typeof v === "number" ? v : parseFloat(v); return isFinite(n) && n > -900 ? n : null; };
+const num = (v: AcisValue | undefined): number | null => {
+	if (v === "T") return 0; // trace
+	const n = typeof v === "number" ? v : parseFloat(String(v));
+	return isFinite(n) && n > -900 ? n : null;
+};
 
 /** 30 years of daily PRISM (≈4 km grid, via NOAA RCC-ACIS) at the exact point + snowfall from the nearest long-record station. */
 async function fetchHistory(lat: number, lon: number, startYear: number, endYear: number, log: Logger): Promise<Daily & { snowStation: string | null }> {
-	const j = await acis("GridData", { loc: `${lon.toFixed(4)},${lat.toFixed(4)}`, sdate: `${startYear}-01-01`, edate: `${endYear}-12-31`, grid: "21", elems: "maxt,mint,pcpn" });
+	const j = await acis<AcisGrid>("GridData", { loc: `${lon.toFixed(4)},${lat.toFixed(4)}`, sdate: `${startYear}-01-01`, edate: `${endYear}-12-31`, grid: "21", elems: "maxt,mint,pcpn" });
 	if (!j?.data?.length) throw new Error("No PRISM data for this point (US lower 48 only).");
-	const time: string[] = [], tmax: any[] = [], tmin: any[] = [], prcp: any[] = [];
+	const time: string[] = [], tmax: (number | null)[] = [], tmin: (number | null)[] = [], prcp: (number | null)[] = [];
 	for (const row of j.data) { time.push(row[0]); tmax.push(num(row[1])); tmin.push(num(row[2])); prcp.push(num(row[3])); }
 	const snowMap: Record<string, number> = {};
 	let snowStation: string | null = null;
 	try {
-		const meta = await acis("StnMeta", { bbox: `${lon - 0.4},${lat - 0.4},${lon + 0.4},${lat + 0.4}`, elems: "snow", sdate: `${startYear}-01-01`, edate: `${endYear}-12-31`, meta: "name,ll,sids,valid_daterange" });
-		const cands = (meta.meta || []).filter((m: any) => m.ll && m.valid_daterange?.[0]?.length === 2)
-			.map((m: any) => ({ m, d: Math.hypot(m.ll[0] - lon, m.ll[1] - lat), yrs: (Date.parse(m.valid_daterange[0][1]) - Date.parse(m.valid_daterange[0][0])) / 3.15e10 }))
-			.filter((c: any) => c.yrs >= 15).sort((a: any, b: any) => a.d - b.d);
+		const meta = await acis<AcisMeta>("StnMeta", { bbox: `${lon - 0.4},${lat - 0.4},${lon + 0.4},${lat + 0.4}`, elems: "snow", sdate: `${startYear}-01-01`, edate: `${endYear}-12-31`, meta: "name,ll,sids,valid_daterange" });
+		const cands = (meta.meta || [])
+			.flatMap((m) => {
+				const range = m.valid_daterange?.[0];
+				if (!m.ll || !range || range.length !== 2) return [];
+				return [{ m, d: Math.hypot(m.ll[0] - lon, m.ll[1] - lat), yrs: (Date.parse(range[1]) - Date.parse(range[0])) / 3.15e10 }];
+			})
+			.filter((c) => c.yrs >= 15).sort((a, b) => a.d - b.d);
 		if (cands.length) {
 			const st = cands[0].m;
-			const sd = await acis("StnData", { sid: st.sids[0].split(" ")[0], sdate: `${startYear}-01-01`, edate: `${endYear}-12-31`, elems: "snow" });
+			const sd = await acis<AcisStnData>("StnData", { sid: st.sids[0].split(" ")[0], sdate: `${startYear}-01-01`, edate: `${endYear}-12-31`, elems: "snow" });
 			for (const row of sd.data || []) { const v = num(row[1]); if (v != null) snowMap[row[0]] = v; }
 			snowStation = `${st.name} (${(cands[0].d * 111).toFixed(0)} km away)`;
 			log(`  snowfall from station: ${snowStation}`);
@@ -55,29 +70,30 @@ async function fetchHistory(lat: number, lon: number, startYear: number, endYear
 
 /** NOAA Climate Prediction Center official outlooks at this point (monthly + up to 13 seasonal leads). */
 interface Outlook { label: string; temp: string; prcp: string }
-async function cpcLayer(service: string, layer: number, lat: number, lon: number): Promise<Record<string, any> | null | undefined> {
+async function cpcLayer(service: string, layer: number, lat: number, lon: number): Promise<Attrs | null | undefined> {
 	const url = `https://mapservices.weather.noaa.gov/vector/rest/services/outlooks/${service}/MapServer/${layer}/query?geometry=${lon},${lat}` +
 		`&geometryType=esriGeometryPoint&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=*&returnGeometry=false&f=json`;
 	try {
-		const j = await getJson<any>(url);
+		const j = await getJson<CpcResponse>(url);
 		if (j.error) return undefined; // layer doesn't exist
 		return j.features?.[0]?.attributes ?? null; // null = no polygon here → equal chances
 	} catch { return undefined; }
 }
-function describe(attrs: Record<string, any> | null, kind: "temp" | "prcp"): string {
+function describe(attrs: Attrs | null, kind: "temp" | "prcp"): string {
 	if (!attrs) return "Equal chances";
 	const v = Object.entries(attrs);
-	const cat = String(v.find(([k]) => /^cat/i.test(k))?.[1] ?? "");
+	const catVal = v.find(([k]) => /^cat/i.test(k))?.[1];
+	const cat = typeof catVal === "string" ? catVal : "";
 	const prob = v.find(([k]) => /^prob/i.test(k))?.[1];
 	const word = /above/i.test(cat) ? (kind === "temp" ? "🔺 Warmer than normal" : "💧 Wetter than normal")
 		: /below/i.test(cat) ? (kind === "temp" ? "🔻 Colder than normal" : "🏜️ Drier than normal")
 		: /normal/i.test(cat) ? "≈ Near normal" : "Equal chances";
-	return prob != null && word !== "Equal chances" ? `${word} (${prob}% chance)` : word;
+	return (typeof prob === "number" || typeof prob === "string") && word !== "Equal chances" ? `${word} (${prob}% chance)` : word;
 }
-function seasonLabel(attrs: Record<string, any> | null, fallback: string): string {
+function seasonLabel(attrs: Attrs | null, fallback: string): string {
 	if (!attrs) return fallback;
 	const v = Object.entries(attrs).find(([k]) => /valid|seas|period|target/i.test(k));
-	return v ? String(v[1]) : fallback;
+	return v && (typeof v[1] === "string" || typeof v[1] === "number") ? String(v[1]) : fallback;
 }
 async function fetchOutlooks(lat: number, lon: number): Promise<Outlook[]> {
 	const out: Outlook[] = [];

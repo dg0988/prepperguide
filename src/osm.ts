@@ -21,6 +21,9 @@ export const CATEGORY_META: Record<Category, { label: string; color: string; emo
 	supplies: { label: "Supplies (food, fuel, hardware)", color: "#7b2cbf", emoji: "🛒" },
 };
 
+interface OverpassElement { type: string; id: number; lat?: number; lon?: number; center?: { lat: number; lon: number }; tags?: Record<string, string> }
+interface OverpassResponse { elements?: OverpassElement[] }
+
 function classify(t: Record<string, string>): { category: Category; kind: string } | null {
 	if (t.natural === "spring") return { category: "water", kind: "Spring" };
 	if (t.amenity === "drinking_water") return { category: "water", kind: "Drinking water" };
@@ -73,11 +76,11 @@ out center tags;`;
 		contentType: "application/x-www-form-urlencoded",
 		body: "data=" + encodeURIComponent(q),
 	});
-	const els: any[] = res.json?.elements || [];
+	const els: OverpassElement[] = (res.json as OverpassResponse | undefined)?.elements ?? [];
 	const out: Feature[] = [];
 	const seenNamedWater = new Set<string>();
 	for (const e of els) {
-		const t = e.tags || {};
+		const t: Record<string, string> = e.tags ?? {};
 		const c = classify(t);
 		if (!c) continue;
 		const flat = e.lat ?? e.center?.lat, flon = e.lon ?? e.center?.lon;
@@ -86,9 +89,9 @@ out center tags;`;
 		// rivers/streams come back as many way segments — keep the closest one per name
 		const key = `${c.kind}|${name}`;
 		if ((c.kind === "River" || c.kind === "Stream") && seenNamedWater.has(key)) {
-			const prev = out.find((f) => `${f.kind}|${f.name}` === key)!;
+			const prev = out.find((f) => `${f.kind}|${f.name}` === key);
 			const d = haversineKm(lat, lon, flat, flon);
-			if (d < prev.distKm) { prev.lat = flat; prev.lon = flon; prev.distKm = d; }
+			if (prev && d < prev.distKm) { prev.lat = flat; prev.lon = flon; prev.distKm = d; }
 			continue;
 		}
 		seenNamedWater.add(key);

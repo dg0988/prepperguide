@@ -1,6 +1,6 @@
 import { App } from "obsidian";
 import { matchPlant, PLANT_DB, PlantInfo, Status } from "./plantdb";
-import { fetchWithRetry, getJson, Logger, safeName, sleep, today, writeBinary, writeText } from "./util";
+import { fetchWithRetry, firstSentence, getJson, Logger, safeName, sleep, today, writeBinary, writeText } from "./util";
 
 export interface Taxon {
 	id: number; name: string; rank: string; preferred_common_name?: string;
@@ -36,9 +36,11 @@ export async function speciesCounts(lat: number, lon: number, radiusKm: number, 
 	return all;
 }
 
+interface WikiSummary { type?: string; extract?: string; content_urls?: { desktop?: { page?: string } } }
+
 export async function wikiSummary(title: string): Promise<{ extract: string; url: string } | null> {
 	try {
-		const j = await getJson<any>(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title.replace(/ /g, "_"))}`);
+		const j = await getJson<WikiSummary>(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title.replace(/ /g, "_"))}`);
 		if (j.type === "disambiguation" || !j.extract) return null;
 		return { extract: j.extract, url: j.content_urls?.desktop?.page || `https://en.wikipedia.org/wiki/${encodeURIComponent(title)}` };
 	} catch { return null; }
@@ -152,7 +154,7 @@ export async function buildPlants(app: App, job: PlantJob): Promise<PlantResult>
 		L.push("| Plant | Scientific name | Local obs. | Key point |", "|---|---|---|---|");
 		for (const h of group) {
 			const link = h.notePath.replace(/\.md$/, "");
-			const key = h.p.use.split(/(?<=\.)\s/)[0].replace(/\|/g, "/");
+			const key = firstSentence(h.p.use).replace(/\|/g, "/");
 			L.push(`| [[${link}\\|${h.sc.taxon.preferred_common_name || h.p.common}]] | *${h.sc.taxon.name}* | ${h.sc.count} | ${key} |`);
 		}
 		L.push("");
@@ -161,7 +163,7 @@ export async function buildPlants(app: App, job: PlantJob): Promise<PlantResult>
 	if (notSeenDeadly.length) {
 		L.push("## Not recorded nearby — but still worth recognizing");
 		L.push("Absence on iNaturalist doesn't mean absence in the field.");
-		for (const p of notSeenDeadly) L.push(`- ${STATUS_META[p.status].icon} **${p.common}** (*${p.key}*) — ${p.use.split(/(?<=\.)\s/)[0]}`);
+		for (const p of notSeenDeadly) L.push(`- ${STATUS_META[p.status].icon} **${p.common}** (*${p.key}*) — ${firstSentence(p.use)}`);
 		L.push("");
 	}
 	L.push("## Other common plants near you (not on the reference list)");

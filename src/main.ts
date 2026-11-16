@@ -6,7 +6,7 @@ import { fetchUsgsWater } from "./usgs";
 import { GUIDES } from "./guides";
 import { buildMaps, MapImage, TILE_SOURCES, TileSource } from "./maps";
 import { Category, CATEGORY_META, Feature, fetchOsmFeatures } from "./osm";
-import { buildPlants } from "./plants";
+import { buildPlants, SpeciesCount } from "./plants";
 import { bearing, fmtCoord, haversineKm, Logger, today, writeText } from "./util";
 import { buildWeather } from "./weather";
 import { buildAlmanac } from "./almanac";
@@ -85,7 +85,7 @@ export default class PrepperPlugin extends Plugin implements MapHost {
 	private busy = false;
 
 	async onload() {
-		this.settings = Object.assign({}, DEFAULTS, await this.loadData());
+		this.settings = Object.assign({}, DEFAULTS, (await this.loadData()) as Partial<Settings> | null);
 		this.registerView(VIEW_TYPE_MAP, (leaf: WorkspaceLeaf) => new PrepperMapView(leaf, this));
 		this.addRibbonIcon("tent", "Prepper: build / refresh field guide", () => this.buildAll());
 		this.addRibbonIcon("map", "Prepper: open offline map", () => this.openMap());
@@ -137,8 +137,8 @@ export default class PrepperPlugin extends Plugin implements MapHost {
 	private placesPath() { return `${this.settings.folder}/.data/places.json`; }
 	async loadPlaces(): Promise<Feature[]> {
 		if (this.features) return this.features;
-		try { this.features = JSON.parse(await this.app.vault.adapter.read(this.placesPath())); } catch { this.features = []; }
-		return this.features!;
+		try { this.features = JSON.parse(await this.app.vault.adapter.read(this.placesPath())) as Feature[]; } catch { this.features = []; }
+		return this.features ?? [];
 	}
 	private async savePlaces(f: Feature[]) {
 		const dir = `${this.settings.folder}/.data`;
@@ -157,7 +157,7 @@ export default class PrepperPlugin extends Plugin implements MapHost {
 		new Notice(`🏠 Home set to ${fmtCoord(lat, lon)}`);
 		new ConfirmModal(this.app, "Update the field guide for this exact spot?",
 			"Recalculates water/resource distances, downloads detailed map tiles around it, and refreshes plants & weather.",
-			() => this.buildAll()).open();
+			() => { void this.buildAll(); }).open();
 	}
 
 	async openMap(pick = false, center?: { lat: number; lon: number }) {
@@ -167,11 +167,11 @@ export default class PrepperPlugin extends Plugin implements MapHost {
 		view.pickMode = pick;
 		view.pickCenter = center || null;
 		await view.render();
-		this.app.workspace.revealLeaf(leaf);
+		await this.app.workspace.revealLeaf(leaf);
 	}
 	private refreshMaps() {
 		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_MAP)) {
-			const v = leaf.view as PrepperMapView; v.pickMode = false; v.pickCenter = null; v.render();
+			const v = leaf.view as PrepperMapView; v.pickMode = false; v.pickCenter = null; void v.render();
 		}
 	}
 
@@ -255,7 +255,7 @@ export default class PrepperPlugin extends Plugin implements MapHost {
 				this.refreshMaps();
 			});
 		}
-		let plantCounts: any[] | undefined;
+		let plantCounts: SpeciesCount[] | undefined;
 		if (what.plants) {
 			await step("Plants", async () => {
 				const r = await buildPlants(this.app, {
@@ -292,7 +292,7 @@ export default class PrepperPlugin extends Plugin implements MapHost {
 		await step("Waypoints note", () => this.writeWaypoints());
 		this.busy = false;
 		modal.done(errors);
-		if (!errors.length) this.app.workspace.openLinkText(`${s.folder}/Prepper Home.md`, "", false);
+		if (!errors.length) void this.app.workspace.openLinkText(`${s.folder}/Prepper Home.md`, "", false);
 	}
 
 	private async writeResources(features: Feature[]) {
@@ -388,8 +388,8 @@ export default class PrepperPlugin extends Plugin implements MapHost {
 class LocationModal extends Modal {
 	private value = "";
 	private resolved = false;
-	constructor(app: App, private onDone: (g: GeoResult | null, pickOnMap: boolean) => void) { super(app); }
-	private finish(g: GeoResult | null, pick = false) { if (!this.resolved) { this.resolved = true; this.onDone(g, pick); } this.close(); }
+	constructor(app: App, private onDone: (g: GeoResult | null, pickOnMap: boolean) => Promise<void> | void) { super(app); }
+	private finish(g: GeoResult | null, pick = false) { if (!this.resolved) { this.resolved = true; void this.onDone(g, pick); } this.close(); }
 
 	onOpen() { this.askStep(); }
 
@@ -407,9 +407,9 @@ class LocationModal extends Modal {
 		new Setting(contentEl).setName("Street address").setDesc('e.g. "123 Main St, Guyton, GA 31312". Coordinates like "32.3105, -81.3912" also work.')
 			.addText((t) => {
 				t.setPlaceholder("123 Main St, Town, ST 12345").setValue(this.value).onChange((v) => (this.value = v));
-				t.inputEl.style.width = "100%";
-				t.inputEl.addEventListener("keydown", (e) => { if (e.key === "Enter") go(); });
-				setTimeout(() => t.inputEl.focus(), 50);
+				t.inputEl.addClass("prepper-wide");
+				t.inputEl.addEventListener("keydown", (e) => { if (e.key === "Enter") void go(); });
+				window.setTimeout(() => t.inputEl.focus(), 50);
 			});
 		new Setting(contentEl)
 			.addButton((b) => b.setButtonText("🗺️ Pick on map").onClick(() => this.finish(null, true)))
@@ -426,20 +426,20 @@ class LocationModal extends Modal {
 		contentEl.empty();
 		contentEl.createEl("h2", { text: "Is this right?" });
 		const card = contentEl.createDiv({ cls: "prepper-match" });
-		card.createEl("div", { text: g.matched || g.label, cls: "prepper-match-addr" });
-		card.createEl("div", { text: `${fmtCoord(g.lat, g.lon)} · via ${g.source}` });
+		card.createDiv({ text: g.matched || g.label, cls: "prepper-match-addr" });
+		card.createDiv({ text: `${fmtCoord(g.lat, g.lon)} · via ${g.source}` });
 		const msg: Record<string, [string, string]> = {
 			exact: ["✅ Address-level match", "prepper-ok"],
 			street: ["⚠️ Street-level only — your house number wasn't found, so this point is somewhere on your street. Fine-tune it on the map.", "prepper-warn"],
 			area: ["⛔ Town/ZIP-level only — distances to water would be measured from the town center and could be miles off. Pick your spot on the map instead.", "prepper-warn"],
 		};
-		card.createEl("div", { text: msg[g.precision][0], cls: msg[g.precision][1] });
+		card.createDiv({ text: msg[g.precision][0], cls: msg[g.precision][1] });
 		new Setting(contentEl)
 			.addButton((b) => b.setButtonText("← Back").onClick(() => this.askStep()))
 			.addButton((b) => { b.setButtonText("🗺️ Fine-tune on map").onClick(() => this.finish(g, true)); if (g.precision !== "exact") b.setCta(); })
 			.addButton((b) => { b.setButtonText("Use this location").onClick(() => this.finish(g)); if (g.precision === "exact") b.setCta(); });
 	}
-	onClose() { this.contentEl.empty(); if (!this.resolved) { this.resolved = true; this.onDone(null, false); } }
+	onClose() { this.contentEl.empty(); if (!this.resolved) { this.resolved = true; void this.onDone(null, false); } }
 }
 
 class ConfirmModal extends Modal {
@@ -478,7 +478,7 @@ class ProModal extends Modal {
 		let key = this.plugin.settings.licenseKey;
 		const status = contentEl.createEl("p", { cls: "prepper-status" });
 		new Setting(contentEl).setName("License key").setDesc("Paste the key from your purchase email (starts with PFG-).")
-			.addText((t) => { t.setPlaceholder("PFG-…").setValue(key).onChange((v) => (key = v.trim())); t.inputEl.style.width = "100%"; })
+			.addText((t) => { t.setPlaceholder("PFG-…").setValue(key).onChange((v) => (key = v.trim())); t.inputEl.addClass("prepper-wide"); })
 			.addButton((b) => b.setButtonText("Activate").setCta().onClick(async () => {
 				const l = verifyLicense(key);
 				if (!l) { status.setText("❌ That key isn't valid. Check for missing characters."); return; }
@@ -486,7 +486,7 @@ class ProModal extends Modal {
 				await this.plugin.saveSettings();
 				new Notice(`⭐ Pro unlocked — thanks, ${l.name.split(" <")[0]}!`);
 				this.close();
-				new ConfirmModal(this.app, "Build the Pro sections now?", "Adds the almanac, medicinal plants guide and pantry plan, and expands your offline maps.", () => this.plugin.buildAll()).open();
+				new ConfirmModal(this.app, "Build the Pro sections now?", "Adds the almanac, medicinal plants guide and pantry plan, and expands your offline maps.", () => { void this.plugin.buildAll(); }).open();
 			}));
 	}
 	onClose() { this.contentEl.empty(); }
@@ -497,11 +497,9 @@ class ProgressModal extends Modal {
 	onOpen() {
 		this.titleEl.setText("🏕️ Building your field guide…");
 		this.contentEl.createEl("p", { text: "This can take a few minutes. You can close this window — work continues in the background." });
-		this.logEl = this.contentEl.createEl("pre");
-		Object.assign(this.logEl.style, { maxHeight: "50vh", overflowY: "auto", whiteSpace: "pre-wrap", fontSize: "12px" });
+		this.logEl = this.contentEl.createEl("pre", { cls: "prepper-log" });
 	}
 	log(msg: string) {
-		console.log("[prepper]", msg);
 		if (!this.logEl) return;
 		this.logEl.appendText(msg + "\n");
 		this.logEl.scrollTop = this.logEl.scrollHeight;
@@ -526,7 +524,7 @@ class PrepperSettingTab extends PluginSettingTab {
 			.setDesc(lic ? `Licensed to ${lic.name}` : `Pro (${PRICE}) adds the almanac, medicinal plants, pantry planner, waypoints, larger and printable maps.`)
 			.addButton((b) => b.setButtonText(lic ? "License…" : "Upgrade / enter key").setCta().onClick(() => this.plugin.showPro()));
 
-		containerEl.createEl("h3", { text: "Location" });
+		new Setting(containerEl).setName("Location").setHeading();
 		new Setting(containerEl)
 			.setName("Current location")
 			.setDesc(this.plugin.hasLocation() ? `${s.matched || s.label} (${fmtCoord(s.lat!, s.lon!)})${s.precision === "area" ? " ⚠️ town-level only — pick your exact spot on the map" : ""}` : "Not set")
@@ -535,7 +533,7 @@ class PrepperSettingTab extends PluginSettingTab {
 		new Setting(containerEl).setName("Vault folder").setDesc("Where everything is written.")
 			.addText((t) => t.setValue(s.folder).onChange(async (v) => { s.folder = v.trim() || "Prepper"; await save(); }));
 
-		containerEl.createEl("h3", { text: "What to build" });
+		new Setting(containerEl).setName("What to build").setHeading();
 		const toggle = (name: string, key: "doMaps" | "doResources" | "doPlants" | "doWeather" | "doGuides" | "doAlmanac" | "doPantry" | "doMedicinal", desc = "") =>
 			new Setting(containerEl).setName(name).setDesc(desc).addToggle((t) => t.setValue(s[key]).onChange(async (v) => { s[key] = v; await save(); }));
 		toggle("Offline maps", "doMaps", "Interactive pan/zoom topo + satellite map that works with no signal.");
@@ -547,7 +545,7 @@ class PrepperSettingTab extends PluginSettingTab {
 		toggle("⭐ Medicinal plants (Pro)", "doMedicinal", "Local medicinal species with evidence ratings, cautions, lookalikes, and an herbal preparations guide.");
 		toggle("Survival guides", "doGuides", "Water purification, foraging safety, fire, shelter & signaling, first aid, go-bag checklist, family emergency plan.");
 
-		containerEl.createEl("h3", { text: "Maps" });
+		new Setting(containerEl).setName("Maps").setHeading();
 		if (!lic) containerEl.createEl("p", { cls: "setting-item-description", text: `Free version downloads ${FREE.overviewKm} km overview and ${FREE.detailKm} km of detail up to zoom ${FREE.maxZoom}. ⭐ Pro uses the full settings below.` });
 		for (const src of TILE_SOURCES) {
 			new Setting(containerEl).setName(src.name).addToggle((t) => t.setValue(s.tileSources.includes(src.id)).onChange(async (v) => {
@@ -567,7 +565,7 @@ class PrepperSettingTab extends PluginSettingTab {
 			est.setText(`Estimated offline map download: ~${e.tiles.toLocaleString()} tiles, ~${e.mb} MB (already-downloaded tiles are skipped).`);
 		};
 		const num = (name: string, desc: string, key: "mapRadiusKm" | "overviewMinZoom" | "overviewMaxZoom" | "detailRadiusKm" | "detailMaxZoom", min: number, max: number, step = 1) =>
-			new Setting(containerEl).setName(name).setDesc(desc).addSlider((sl) => sl.setLimits(min, max, step).setValue(s[key]).setDynamicTooltip()
+			new Setting(containerEl).setName(name).setDesc(desc).addSlider((sl) => sl.setLimits(min, max, step).setValue(s[key])
 				.onChange(async (v) => { s[key] = v; await save(); updEst(); }));
 		num("Overview radius (km)", "Area covered at overview zooms (25 km ≈ 15 mi).", "mapRadiusKm", 5, 100, 5);
 		num("Overview zoom from", "8 = multi-county region.", "overviewMinZoom", 5, 11);
@@ -582,19 +580,19 @@ class PrepperSettingTab extends PluginSettingTab {
 		new Setting(containerEl).setName("Printable zoom levels").setDesc("Comma-separated, e.g. 11,13,15.")
 			.addText((t) => t.setValue(s.zooms).onChange(async (v) => { s.zooms = v; await save(); }));
 		new Setting(containerEl).setName("Printable max tiles per side").setDesc("Caps printable image size (×256 px). Keep ≤16 on phones/tablets.")
-			.addSlider((sl) => sl.setLimits(4, 32, 1).setValue(s.maxTilesPerSide).setDynamicTooltip().onChange(async (v) => { s.maxTilesPerSide = v; await save(); }));
+			.addSlider((sl) => sl.setLimits(4, 32, 1).setValue(s.maxTilesPerSide).onChange(async (v) => { s.maxTilesPerSide = v; await save(); }));
 
-		containerEl.createEl("h3", { text: "Resources" });
+		new Setting(containerEl).setName("Resources").setHeading();
 		new Setting(containerEl).setName("Resource search radius (km)")
-			.addSlider((sl) => sl.setLimits(2, 50, 1).setValue(s.resourceRadiusKm).setDynamicTooltip().onChange(async (v) => { s.resourceRadiusKm = v; await save(); }));
+			.addSlider((sl) => sl.setLimits(2, 50, 1).setValue(s.resourceRadiusKm).onChange(async (v) => { s.resourceRadiusKm = v; await save(); }));
 		new Setting(containerEl).setName("Include USGS springs, wells & streams").setDesc("National water inventory — far more rural springs and wells than OpenStreetMap.")
 			.addToggle((t) => t.setValue(s.useUsgsWater).onChange(async (v) => { s.useUsgsWater = v; await save(); }));
 		new Setting(containerEl).setName("Max markers on printable maps")
-			.addSlider((sl) => sl.setLimits(20, 400, 10).setValue(s.maxMarkers).setDynamicTooltip().onChange(async (v) => { s.maxMarkers = v; await save(); }));
+			.addSlider((sl) => sl.setLimits(20, 400, 10).setValue(s.maxMarkers).onChange(async (v) => { s.maxMarkers = v; await save(); }));
 
-		containerEl.createEl("h3", { text: "⭐ Household (pantry plan)" });
+		new Setting(containerEl).setName("⭐ Household (pantry plan)").setHeading();
 		const hh = (name: string, key: "adults" | "children" | "dogs" | "cats", max: number, desc = "") =>
-			new Setting(containerEl).setName(name).setDesc(desc).addSlider((sl) => sl.setLimits(0, max, 1).setValue(s[key]).setDynamicTooltip().onChange(async (v) => { s[key] = v; await save(); }));
+			new Setting(containerEl).setName(name).setDesc(desc).addSlider((sl) => sl.setLimits(0, max, 1).setValue(s[key]).onChange(async (v) => { s[key] = v; await save(); }));
 		hh("Adults (12+)", "adults", 12);
 		hh("Children (under 12)", "children", 12, "Counted at 70% of an adult's food.");
 		hh("Dogs", "dogs", 10); hh("Cats", "cats", 10);
@@ -603,9 +601,9 @@ class PrepperSettingTab extends PluginSettingTab {
 			d.setValue(String(s.pantryDays)).onChange(async (v) => { s.pantryDays = parseInt(v); await save(); });
 		});
 
-		containerEl.createEl("h3", { text: "Plants" });
+		new Setting(containerEl).setName("Plants").setHeading();
 		new Setting(containerEl).setName("Plant search radius (km)")
-			.addSlider((sl) => sl.setLimits(5, 100, 5).setValue(s.plantRadiusKm).setDynamicTooltip().onChange(async (v) => { s.plantRadiusKm = v; await save(); }));
+			.addSlider((sl) => sl.setLimits(5, 100, 5).setValue(s.plantRadiusKm).onChange(async (v) => { s.plantRadiusKm = v; await save(); }));
 		new Setting(containerEl).setName("Include dangerous mushrooms").setDesc("Danger list only — the plugin never recommends eating wild mushrooms.")
 			.addToggle((t) => t.setValue(s.includeFungi).onChange(async (v) => { s.includeFungi = v; await save(); }));
 		new Setting(containerEl).setName("Download plant photos").addToggle((t) => t.setValue(s.downloadPhotos).onChange(async (v) => { s.downloadPhotos = v; await save(); }));

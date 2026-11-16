@@ -22,7 +22,7 @@ export function verifyLicense(key: string): License | null {
 	try {
 		const ok = nacl.sign.detached.verify(new TextEncoder().encode(m[1]), unb64u(m[2]), unb64u(PUBLIC_KEY));
 		if (!ok) return null;
-		const p = JSON.parse(new TextDecoder().decode(unb64u(m[1])));
+		const p = JSON.parse(new TextDecoder().decode(unb64u(m[1]))) as { n: string; t: string; i: string; id: string };
 		return { name: p.n, tier: p.t, issued: p.i, id: p.id };
 	} catch { return null; }
 }

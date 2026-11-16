@@ -64,7 +64,7 @@ export async function buildMaps(app: App, job: MapJob): Promise<MapImage[]> {
 			const nx = x1 - x0 + 1, ny = y1 - y0 + 1;
 			job.log(`Map: ${src.name.split(" (")[0]} zoom ${z} — downloading ${nx * ny} tiles…`);
 
-			const canvas = document.createElement("canvas");
+			const canvas = createEl("canvas");
 			canvas.width = nx * 256; canvas.height = ny * 256;
 			const ctx = canvas.getContext("2d")!;
 			ctx.fillStyle = "#e8e8e8"; ctx.fillRect(0, 0, canvas.width, canvas.height);
