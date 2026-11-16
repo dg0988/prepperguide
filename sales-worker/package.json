@@ -1,0 +1,17 @@
+{
+  "name": "prepper-pro-sales",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "bundle": "esbuild src/index.js --bundle --format=esm --platform=neutral --main-fields=module,main --alias:crypto=./crypto-stub.js --outfile=dist/worker.js"
+  },
+  "dependencies": {
+    "tweetnacl": "^1.0.3"
+  },
+  "devDependencies": {
+    "wrangler": "^3.80.0",
+    "esbuild": "^0.21.0"
+  }
+}

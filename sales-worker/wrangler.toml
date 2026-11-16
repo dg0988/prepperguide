@@ -1,0 +1,28 @@
+name = "prepper-pro"
+main = "src/index.js"
+compatibility_date = "2026-11-01"
+
+# Stores issued licenses (by Stripe checkout session and buyer email). Create with:
+#   npx wrangler kv namespace create LICENSES
+# then paste the id below.
+[[kv_namespaces]]
+binding = "LICENSES"
+id = "PASTE_KV_NAMESPACE_ID_HERE"
+
+[vars]
+PRICE = "19.00"
+CURRENCY = "USD"
+PRODUCT_NAME = "Prepper Field Guide Pro"
+SELLER_NAME = "ID Communications LLC"
+SUPPORT_EMAIL = "support@example.com"
+EMAIL_FROM = "Prepper Field Guide <licenses@example.com>"   # must be a domain verified in Resend
+DIRECTORY_URL = "https://community.obsidian.md/plugins/prepper-field-guide"
+STRIPE_AUTOMATIC_TAX = "false"   # set "true" only after turning on Stripe Tax in your dashboard
+# PUBLIC_URL = "https://prepper.idcomm.tech"   # optional: force the domain used in Stripe redirect URLs
+
+# Secrets (never put these in this file) — set with `npx wrangler secret put NAME`:
+#   STRIPE_SECRET_KEY      sk_test_… while testing, sk_live_… (or a restricted key) when live
+#   STRIPE_WEBHOOK_SECRET  whsec_… from the webhook endpoint you create in Stripe
+#   LICENSE_PRIVATE_KEY    the private key line from PRO-KEYS-keep-secret.txt
+#   ADMIN_TOKEN            any long random string, for manually issuing comp keys
+#   RESEND_API_KEY         (optional) to email keys to buyers
